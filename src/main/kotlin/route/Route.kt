@@ -5,8 +5,8 @@ import io.ktor.http.*
 import io.ktor.request.*
 import io.ktor.response.*
 import io.ktor.routing.*
-import org.jetbrains.exposed.sql.transactions.transaction
-import top.suransea.model.*
+import top.suransea.model.Article
+import top.suransea.model.ArticleAccess
 
 fun Routing.all() {
     article()
@@ -14,82 +14,36 @@ fun Routing.all() {
 
 fun Routing.article() = route("/articles") {
     get {
-        transaction {
-            ArticleEntity.all().map(::Article)
-        }.let {
-            call.respond(it)
-        }
+        call.respond(ArticleAccess.all())
     }
     get("/{id}") {
-        val id = call.parameters["id"]?.toIntOrNull()
-        id ?: run {
+        val id = call.parameters["id"]?.toIntOrNull() ?: run {
             call.respond(HttpStatusCode.BadRequest, "invalid id.")
             return@get
         }
-        transaction {
-            ArticleEntity.findById(id)?.run(::Article)
-        }?.let {
+        ArticleAccess.findById(id)?.let {
             call.respond(it)
-        } ?: run {
-            call.respond(HttpStatusCode.NotFound, "")
-        }
+        } ?: call.respond(HttpStatusCode.NotFound, "no result.")
     }
     post {
-        val article: Article = call.receive()
-        transaction {
-            ArticleEntity.new {
-                title = article.title.orEmpty()
-                summery = article.summary.orEmpty()
-                contentId = ContentEntity.new {
-                    content = article.content.orEmpty()
-                    setupTime()
-                }.id.value
-                setupTime()
-            }
-        }.let {
-            call.respond(it.id.value)
-        }
+        call.respond(ArticleAccess.add(call.receive()))
     }
     put("/{id}") {
-        val id = call.parameters["id"]?.toIntOrNull()
-        id ?: run {
+        val id = call.parameters["id"]?.toIntOrNull() ?: run {
             call.respond(HttpStatusCode.BadRequest, "invalid id.")
             return@put
         }
         val article: Article = call.receive()
-        var found = false
-        transaction {
-            ArticleEntity.findById(id)?.apply {
-                found = true
-                title = article.title.orEmpty()
-                summery = article.summary.orEmpty()
-                updateTime()
-                ContentEntity[contentId].content = article.content.orEmpty()
-            } ?: run {
-                ArticleEntity.new(id) {
-                    title = article.title.orEmpty()
-                    summery = article.summary.orEmpty()
-                    contentId = ContentEntity.new {
-                        content = article.content.orEmpty()
-                        setupTime()
-                    }.id.value
-                    setupTime()
-                }
-            }
-        }
-        call.respond(if (found) HttpStatusCode.OK else HttpStatusCode.Created, "")
+        article.id = id
+        ArticleAccess.addOrUpdate(article)
+        call.respond(HttpStatusCode.OK, "")
     }
     delete("/{id}") {
-        val id = call.parameters["id"]?.toIntOrNull()
-        id ?: run {
+        val id = call.parameters["id"]?.toIntOrNull() ?: run {
             call.respond(HttpStatusCode.BadRequest, "invalid id.")
             return@delete
         }
-        transaction {
-            val article = ArticleEntity.findById(id) ?: return@transaction
-            ContentEntity[article.id.value].delete()
-            article.delete()
-        }
+        ArticleAccess.remove(id)
         call.respond(HttpStatusCode.OK, "")
     }
 }
